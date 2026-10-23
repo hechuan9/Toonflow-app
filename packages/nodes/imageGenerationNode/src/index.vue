@@ -8,9 +8,11 @@
     :downloadName="outputFile?.url.split(/[\\/]/).at(-1)"
     @fullscreen="previewVisible = true"
     :bottomWidth="660"
-    :style="{ width: (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
+    :style="{ width: data.candidatesExpanded && data.candidates.length ? '760px' : (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
     <template v-if="editor?.mode" #top><div ref="paintToolbar" /></template>
     <template #topActions>
+      <el-button v-if="data.candidates.length" text :disabled="!!editor?.mode" :aria-expanded="data.candidatesExpanded" @click.stop="data.candidatesExpanded = !data.candidatesExpanded">{{ data.candidatesExpanded ? '收起候选' : '展开候选' }}（{{ data.candidates.length }}）</el-button>
+      <el-button v-if="data.candidates.length > 1" text @click.stop="compareVisible = true">大图比较</el-button>
       <el-button class="panoramaButton" :icon="IconPanoramaHorizontal" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting || panorama?.busy || !previewUrl" text title="全景图" aria-label="全景图" @click.stop="panorama?.open($event)">全景图<icon-chevron-down class="menuChevron" :size="14" /></el-button>
       <el-button :icon="IconBrush" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="局部重绘" aria-label="局部重绘" @click.stop="startEditor('inpaint')">局部重绘</el-button>
       <el-button :icon="IconSun" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="打光" aria-label="打光" @click.stop="openLighting">打光</el-button>
@@ -23,7 +25,13 @@
     <template #topRightActions>
       <el-button :icon="IconPencil" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="标记" aria-label="标记" @click.stop="startEditor('mark')" />
     </template>
-    <div v-loading="generating || uploading" class="imageContent nopan" :aria-busy="generating || uploading">
+    <div v-if="data.candidatesExpanded && data.candidates.length" class="candidateGroup nodrag nopan nowheel" @pointerdown.stop @dblclick.stop>
+      <div class="candidateHeading"><span>候选图片 · {{ data.candidates.length }} 张</span><span>{{ generating ? `已完成 ${batchCompleted}/${batchTotal}，逐张生成中` : '点击图片选择，下游使用选中图' }}</span></div>
+      <div class="candidateGrid">
+        <candidateCard v-for="(item, index) in data.candidates" :key="item.url" :item="item" :index="index" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" @select="selectCandidate(item)" @preview="openCandidatePreview(index)" />
+      </div>
+    </div>
+    <div v-else v-loading="generating || uploading" class="imageContent nopan" :aria-busy="generating || uploading">
       <imageEditor
         v-if="previewUrl"
         ref="editor"
@@ -99,6 +107,15 @@
       </el-card>
     </template>
   </nodeSkeleton>
+  <el-dialog v-model="compareVisible" title="候选图片比较" width="min(1400px, calc(100vw - 32px))" appendToBody destroyOnClose>
+    <div class="compareGallery nodrag nopan nowheel" @pointerdown.stop @mousedown.stop @dblclick.stop @keydown.stop>
+      <p>点击满意的图片设为节点输出；其他候选会继续保留。点击“放大”查看原图。</p>
+      <div class="candidateGrid">
+        <candidateCard v-for="(item, index) in data.candidates" :key="item.url" :item="item" :index="index" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" @select="selectCandidate(item)" @preview="openCandidatePreview(index)" />
+      </div>
+    </div>
+  </el-dialog>
+  <el-image-viewer v-if="candidatePreviewVisible && candidatePreviewUrl" :urlList="[candidatePreviewUrl]" teleported @close="candidatePreviewVisible = false" />
   <imageLighting v-if="lightingVisible" ref="lighting" :src="previewUrl" :source="outputFile" :target="lightingTarget" :disabled="generating || deleting || uploading || gridSplit?.splitting" @close="lightingVisible = false" />
   <imageMultiAngle v-if="multiAngleVisible" ref="multiAngle" :src="previewUrl" :source="outputFile" :target="multiAngleTarget" :disabled="generating || deleting || uploading || gridSplit?.splitting" @close="multiAngleVisible = false" />
   <imagePanorama ref="panorama" :src="previewUrl" :source="outputFile" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting" @open="openPanorama" />
@@ -113,8 +130,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
-import { useVueFlow } from "@vue-flow/core";
-import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer } from "element-plus";
+import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer, ElDialog } from "element-plus";
 import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeImageRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
@@ -131,6 +147,8 @@ import { buildInpaintRequest, useImageInpaint, type ImageInpaint } from "@toonfl
 import imageLighting from "@toonflow/node-image/imageLighting";
 import imagePanorama from "@toonflow/node-image/imagePanorama";
 import imageMultiAngle from "@toonflow/node-image/imageMultiAngle";
+import type { NodeMediaValue } from "@toonflow/nodes-scaffold/values";
+import candidateCard from "./components/candidateCard.vue";
 import generationSettings from "./components/generationSettings.vue";
 
 defineOptions({
@@ -142,12 +160,11 @@ defineOptions({
   ] satisfies NodeHandle[],
 });
 const vLoading = ElLoading.directive;
-const { addNodes, getNodes, nodeTypes } = useVueFlow();
 const { id, node, nodeProps, nodeEvent, outputs, files, ai, updateNodeInternals } = useNode({
   label: "图片生成",
 });
 type PromptModel = NonNullable<InstanceType<typeof promptInput>["$props"]["modelValue"]>;
-const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; inpaint?: ImageInpaint });
+const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; candidates: NodeMediaValue[]; candidatesExpanded: boolean; inpaint?: ImageInpaint });
 data.value.prompt ??= "";
 data.value.promptModel ??= [];
 data.value.inpaintPrompt ??= "";
@@ -156,6 +173,11 @@ data.value.model ??= "";
 data.value.size ??= "";
 data.value.ratio ??= "16:9";
 data.value.count ??= 1;
+data.value.candidates ??= [];
+data.value.candidatesExpanded ??= false;
+const compareVisible = ref(false);
+const candidatePreviewVisible = ref(false);
+const candidatePreviewIndex = ref(0);
 const batchCompleted = ref(0);
 const batchTotal = ref(1);
 const { refList, referenceMentions, setReferencePreview, removeReference } = useNodeReferences();
@@ -237,6 +259,23 @@ const priceInput = computed(() => {
   return inpaint ? buildInpaintRequest(input, inpaint) : input;
 });
 const outputFile = computed(() => outputs.value.image?.dataType === "IMAGE" ? outputs.value.image.value : undefined);
+const candidateSelectionDisabled = computed(() => deleting.value || uploading.value || !!editor.value?.mode || !!lighting.value?.generating || !!multiAngle.value?.generating || !!panorama.value?.busy || !!gridSplit.value?.splitting);
+const candidatePreviewUrl = files.useFileUrl(
+  () => candidatePreviewVisible.value ? data.value.candidates[candidatePreviewIndex.value] : undefined,
+  error => showNodeError(error, "候选图片读取失败")
+);
+function openCandidatePreview(index: number) {
+  candidatePreviewIndex.value = index;
+  candidatePreviewVisible.value = true;
+}
+function selectCandidate(item: NodeMediaValue) {
+  if (candidateSelectionDisabled.value) return;
+  outputs.value.image = { dataType: "IMAGE", value: { ...item } };
+}
+watch(() => [data.value.candidatesExpanded, data.value.candidates.length], async () => {
+  await nextTick();
+  updateNodeInternals();
+});
 const inpaintGuideUrl = files.useFileUrl(
   () => data.value.inpaint?.guide ? { url: data.value.inpaint.guide, mimeType: "image/png" } : undefined,
   error => showNodeError(error, "重绘标注读取失败")
@@ -339,51 +378,31 @@ async function startGeneration() {
   if (!input) throw new Error("请先选择图片模型");
   const count = data.value.count;
   if (!Number.isSafeInteger(count) || count < 1) throw new Error("生成张数必须为正整数");
-  if (count > 1 && !nodeTypes.value?.["remote-imageNode"]) throw new Error("请先启用图片节点插件，以保留批量结果");
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
   const inpaintData = data.value.inpaint;
   generationController = controller;
   batchCompleted.value = 0;
   batchTotal.value = count;
+  // 保留当前输出及历次候选，后续生成不覆盖用户的选择。
+  if (outputFile.value && !data.value.candidates.some(item => item.url === outputFile.value!.url)) data.value.candidates.push({ ...outputFile.value });
+  if (count > 1) data.value.candidatesExpanded = true;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace.list()
     .then(async ({ directory }) => {
       for (let index = 0; index < count; index++) {
         controller.signal.throwIfAborted();
-        const resultId = crypto.randomUUID();
-        const request = { ...input, directory, ...(count > 1 ? { outputDirectory: `assets/${resultId}` } : {}) };
+        const request = { ...input, directory };
         const results = await (inpaintData
           ? generateInpaint(request, inpaintData, controller.signal)
           : ai.generateImage(request, controller.signal));
         controller.signal.throwIfAborted();
         if (!results.length) throw new Error("供应商未返回图片");
-        for (const [resultIndex, result] of results.entries()) {
-          if (count > 1) {
-            const imageId = resultIndex === 0 ? resultId : crypto.randomUUID();
-            if (resultIndex > 0) {
-              await workspace.mkdir(`assets/${imageId}`);
-              const path = `assets/${imageId}/${result.path.split("/").at(-1)}`;
-              await workspace.rename(result.path, path);
-              result.path = path;
-            }
-            const [width = 16, height = 9] = (input.ratio ?? "16:9").split(":").map(Number);
-            const outputWidth = 240 * width / height + 18;
-            const x = node.computedPosition.x + (node.dimensions.width || 320) + 80;
-            let y = node.computedPosition.y;
-            for (const other of [...getNodes.value].sort((left, right) => left.computedPosition.y - right.computedPosition.y)) {
-              const position = other.computedPosition;
-              if (position.x < x + outputWidth && position.x + (other.dimensions.width || 320) > x && position.y < y + 300 && position.y + (other.dimensions.height || 300) > y) {
-                y = position.y + (other.dimensions.height || 300) + 40;
-              }
-            }
-            addNodes({ id: imageId, type: "remote-imageNode", position: { x, y }, data: {
-              label: `${node.data.label || "图片生成"} · ${index + 1}${results.length > 1 ? `-${resultIndex + 1}` : ""}`,
-              outputs: { image: { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } } },
-            } });
-            await nextTick();
-          }
-          outputs.value.image = { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } };
+        for (const result of results) {
+          const item = { url: result.path, mimeType: result.mimeType };
+          data.value.candidates.push(item);
+          // 首张自动成为输出；已有选择在批量追加时保持不变。
+          if (!outputFile.value || count === 1) outputs.value.image = { dataType: "IMAGE", value: { ...item } };
         }
         batchCompleted.value = index + 1;
       }
@@ -438,10 +457,12 @@ function openMultiAngle() {
   multiAngleVisible.value = true;
 }
 
-function startEditor(mode: "inpaint" | "mark") {
+async function startEditor(mode: "inpaint" | "mark") {
   if (generating.value || deleting.value || uploading.value || editor.value?.busy || lighting.value?.generating || multiAngle.value?.generating || panorama.value?.busy || gridSplit.value?.splitting) return;
   lightingVisible.value = false;
   multiAngleVisible.value = false;
+  data.value.candidatesExpanded = false;
+  await nextTick();
   editor.value?.start(mode);
 }
 
@@ -515,7 +536,7 @@ nodeTools.register({
 
 nodeTools.register({
   name: "generateImage",
-  description: "按配置张数逐张生成，批量结果分别保留在画布；使用普通生成提示词、模型、分辨率、比例和参考图片；局部重绘模式下须先退出；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止剩余生成并保留已有结果",
+  description: "按配置张数逐张生成，批量结果保留在本节点候选组，可展开比较并选择节点输出；使用普通生成提示词、模型、分辨率、比例和参考图片；局部重绘模式下须先退出；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止剩余生成并保留已有结果",
   parameters: z.strictObject({}),
   execute(_args, { signal }) {
     signal?.throwIfAborted();
@@ -525,6 +546,17 @@ nodeTools.register({
 </script>
 
 <style scoped lang="scss">
+.candidateGroup {
+  padding: 8px;
+  .candidateHeading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
+  .candidateGrid { max-height: 620px; overflow: auto; }
+}
+.candidateGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.compareGallery {
+  p { margin: 0 0 16px; color: var(--el-text-color-secondary); }
+  .candidateGrid { max-height: 72vh; overflow: auto; padding: 4px; }
+  @media (max-width: 700px) { .candidateGrid { grid-template-columns: minmax(0, 1fr); } }
+}
 .panoramaButton {
   &[aria-expanded="true"] .menuChevron { transform: rotate(180deg); }
 }
