@@ -6,6 +6,8 @@
         <button :aria-pressed="starredOnly" @click="starredOnly = !starredOnly">{{ starredOnly ? '★ 仅看星标' : '☆ 星标筛选' }}</button>
         <button v-if="current" :aria-pressed="!!current.starred" @click="emit('star', current)">{{ current.starred ? '★ 已星标' : '☆ 星标' }}</button>
         <button v-if="current" :disabled="disabled || current.url === mainUrl" @click="emit('select', current)">{{ current.url === mainUrl ? '✓ 主图' : '设为主图' }}</button>
+        <button v-if="current" :disabled="!canRemove" aria-label="删除当前候选" title="删除候选（可撤销）" @click="emit('remove', current)">删除</button>
+        <button v-if="canRestore" @click="emit('restore')">撤销删除</button>
         <button class="closeViewer" aria-label="关闭全屏查看" @click="emit('close')">×</button>
       </div>
     </template>
@@ -29,8 +31,8 @@ import { ElDialog } from "element-plus";
 import { useNodeFiles } from "@toonflow/nodes-scaffold/workspaceFiles";
 import type { NodeMediaValue } from "@toonflow/nodes-scaffold/values";
 import candidateCard from "./candidateCard.vue";
-const props = defineProps<{ items: (NodeMediaValue & { starred?: boolean })[]; initialIndex: number; mainUrl?: string; disabled?: boolean }>();
-const emit = defineEmits<{ close: []; select: [item: NodeMediaValue]; star: [item: NodeMediaValue] }>();
+const props = defineProps<{ items: (NodeMediaValue & { starred?: boolean })[]; initialIndex: number; mainUrl?: string; disabled?: boolean; canRemove?: boolean; canRestore?: boolean }>();
+const emit = defineEmits<{ close: []; select: [item: NodeMediaValue]; star: [item: NodeMediaValue]; remove: [item: NodeMediaValue]; restore: [] }>();
 const previewIndex = ref(props.initialIndex);
 const starredOnly = ref(false);
 const visibleItems = computed(() => props.items.filter(item => !starredOnly.value || item.starred));
@@ -40,7 +42,10 @@ const files = useNodeFiles();
 const url = files.useFileUrl(current, () => { failed.value = true; });
 watch(current, () => { failed.value = false; });
 watch(visibleItems, items => {
-  if (!items.some(item => item.url === current.value?.url)) previewIndex.value = items.length ? props.items.indexOf(items[0]!) : -1;
+  if (!items.some(item => item.url === current.value?.url)) {
+    const next = props.items[Math.min(Math.max(previewIndex.value, 0), props.items.length - 1)];
+    previewIndex.value = next && items.includes(next) ? props.items.indexOf(next) : items.length ? props.items.indexOf(items[0]!) : -1;
+  }
 });
 function move(direction: number) {
   const items = visibleItems.value;
