@@ -3,7 +3,7 @@
     <template #reference>
       <el-button class="settingsButton" text size="small" :disabled="disabled" :aria-expanded="settingsVisible" aria-label="图片生成设置">
         <span class="ratioShape" :style="ratioStyle(ratio)" aria-hidden="true" />
-        <span>{{ ratio }} · {{ size }} · 1张</span>
+        <span>{{ ratio }} · {{ size }} · {{ count }}张</span>
         <component :is="settingsVisible ? IconChevronDown : IconChevronUp" :size="14" aria-hidden="true" />
       </el-button>
     </template>
@@ -28,19 +28,23 @@
           </span>
         </el-button>
       </div>
+      <div class="sectionLabel">张数</div>
+      <el-input-number v-model="count" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :step="1" :disabled="disabled" controlsPosition="right" aria-label="生成张数" />
+      <p>逐张排队生成，停止后保留已完成的图片。</p>
     </div>
   </el-popover>
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { ElButton, ElPopover, ElRadioGroup, ElRadioButton } from "element-plus";
+import { ElButton, ElPopover, ElRadioGroup, ElRadioButton, ElInputNumber } from "element-plus";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-vue";
 
 defineProps<{ sizes: string[]; ratios: string[]; disabled?: boolean }>();
 const settingsVisible = ref(false);
 const size = defineModel<string>("size", { required: true });
 const ratio = defineModel<string>("ratio", { required: true });
+const count = defineModel<number>("count", { required: true });
 
 function ratioStyle(value: string) {
   const [width = 1, height = 1] = value.split(":").map(Number);
@@ -65,6 +69,7 @@ function ratioStyle(value: string) {
 .generationSettings {
   text-align: left;
   .sectionLabel {
+    margin-top: 12px;
     margin-bottom: 8px;
     color: var(--el-text-color-secondary);
     font-size: 12px;

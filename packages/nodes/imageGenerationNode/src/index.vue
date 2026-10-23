@@ -79,11 +79,13 @@
             v-if="editor?.mode !== 'inpaint'"
             v-model:size="data.size"
             v-model:ratio="data.ratio"
+            v-model:count="data.count"
             :sizes="sizeOptions"
             :ratios="ratioOptions"
             :disabled="generating || deleting || !selectedModel" />
           <el-button v-if="editor?.mode === 'inpaint'" class="confirmButton" type="primary" :icon="IconCheck" :loading="editor.busy" :disabled="deleting || uploading || !generationPrompt" @click="confirmInpaint().catch(error => showNodeError(error, '重绘节点创建失败'))">确认</el-button>
           <div v-else class="generationActions">
+            <span v-if="generating && batchTotal > 1" role="status" aria-live="polite">已完成 {{ batchCompleted }}/{{ batchTotal }}</span>
             <mediaPrice v-if="priceInput" :input="{ ...priceInput, mediaType: 'image' }" :supported="selectedModel?.supportsPrice === true" />
             <el-button
               class="sendButton"
@@ -111,6 +113,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
+import { useVueFlow } from "@vue-flow/core";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer } from "element-plus";
 import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeImageRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
@@ -139,11 +142,12 @@ defineOptions({
   ] satisfies NodeHandle[],
 });
 const vLoading = ElLoading.directive;
+const { addNodes, getNodes, nodeTypes } = useVueFlow();
 const { id, node, nodeProps, nodeEvent, outputs, files, ai, updateNodeInternals } = useNode({
   label: "图片生成",
 });
 type PromptModel = NonNullable<InstanceType<typeof promptInput>["$props"]["modelValue"]>;
-const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; inpaint?: ImageInpaint });
+const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; inpaint?: ImageInpaint });
 data.value.prompt ??= "";
 data.value.promptModel ??= [];
 data.value.inpaintPrompt ??= "";
@@ -151,6 +155,9 @@ data.value.inpaintPromptModel ??= [];
 data.value.model ??= "";
 data.value.size ??= "";
 data.value.ratio ??= "16:9";
+data.value.count ??= 1;
+const batchCompleted = ref(0);
+const batchTotal = ref(1);
 const { refList, referenceMentions, setReferencePreview, removeReference } = useNodeReferences();
 const models = ref<NodeMediaModel[]>([]);
 const modelsLoading = ref(false);
@@ -330,22 +337,56 @@ async function startGeneration() {
   const references = refList.value.filter(item => !data.value.inpaint || item.dataType !== "IMAGE" || item.value?.url !== data.value.inpaint.source);
   if (references.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
   if (!input) throw new Error("请先选择图片模型");
+  const count = data.value.count;
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error("生成张数必须为正整数");
+  if (count > 1 && !nodeTypes.value?.["remote-imageNode"]) throw new Error("请先启用图片节点插件，以保留批量结果");
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
   const inpaintData = data.value.inpaint;
   generationController = controller;
+  batchCompleted.value = 0;
+  batchTotal.value = count;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace.list()
-    .then(({ directory }) => {
-      controller.signal.throwIfAborted();
-      return inpaintData
-        ? generateInpaint({ ...input, directory }, inpaintData, controller.signal)
-        : ai.generateImage({ ...input, directory }, controller.signal);
-    })
-    .then(([result]) => {
-      controller.signal.throwIfAborted();
-      if (!result) throw new Error("供应商未返回图片");
-      outputs.value.image = { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } };
+    .then(async ({ directory }) => {
+      for (let index = 0; index < count; index++) {
+        controller.signal.throwIfAborted();
+        const resultId = crypto.randomUUID();
+        const request = { ...input, directory, ...(count > 1 ? { outputDirectory: `assets/${resultId}` } : {}) };
+        const results = await (inpaintData
+          ? generateInpaint(request, inpaintData, controller.signal)
+          : ai.generateImage(request, controller.signal));
+        controller.signal.throwIfAborted();
+        if (!results.length) throw new Error("供应商未返回图片");
+        for (const [resultIndex, result] of results.entries()) {
+          if (count > 1) {
+            const imageId = resultIndex === 0 ? resultId : crypto.randomUUID();
+            if (resultIndex > 0) {
+              await workspace.mkdir(`assets/${imageId}`);
+              const path = `assets/${imageId}/${result.path.split("/").at(-1)}`;
+              await workspace.rename(result.path, path);
+              result.path = path;
+            }
+            const [width = 16, height = 9] = (input.ratio ?? "16:9").split(":").map(Number);
+            const outputWidth = 240 * width / height + 18;
+            const x = node.computedPosition.x + (node.dimensions.width || 320) + 80;
+            let y = node.computedPosition.y;
+            for (const other of [...getNodes.value].sort((left, right) => left.computedPosition.y - right.computedPosition.y)) {
+              const position = other.computedPosition;
+              if (position.x < x + outputWidth && position.x + (other.dimensions.width || 320) > x && position.y < y + 300 && position.y + (other.dimensions.height || 300) > y) {
+                y = position.y + (other.dimensions.height || 300) + 40;
+              }
+            }
+            addNodes({ id: imageId, type: "remote-imageNode", position: { x, y }, data: {
+              label: `${node.data.label || "图片生成"} · ${index + 1}${results.length > 1 ? `-${resultIndex + 1}` : ""}`,
+              outputs: { image: { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } } },
+            } });
+            await nextTick();
+          }
+          outputs.value.image = { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } };
+        }
+        batchCompleted.value = index + 1;
+      }
     }))
     .catch((error) => showNodeError(error, "图片生成失败"))
     .finally(() => {
@@ -411,6 +452,7 @@ function getConfig() {
       modelId: selectedModel.value?.modelId ?? "",
       size: data.value.size,
       ratio: data.value.ratio,
+      count: data.value.count,
     },
     models: models.value,
   };
@@ -418,7 +460,7 @@ function getConfig() {
 
 nodeTools.register({
   name: "getConfig",
-  description: "读取此图片生成节点的当前模型、分辨率、比例及可选图片模型能力，不含密钥；未声明分辨率或比例时分别使用 2K、16:9",
+  description: "读取此图片生成节点的当前模型、分辨率、比例、张数及可选图片模型能力，不含密钥；未声明分辨率或比例时分别使用 2K、16:9",
   parameters: z.strictObject({}),
   async execute(_args, { signal }) {
     signal?.throwIfAborted();
@@ -430,12 +472,13 @@ nodeTools.register({
 
 nodeTools.register({
   name: "setConfig",
-  description: "修改此图片生成节点的模型、分辨率或比例；先用 getConfig 查询可选能力，providerId 与 modelId 必须同时提供；不修改提示词、不启动生成",
+  description: "修改此图片生成节点的模型、分辨率、比例或张数；先用 getConfig 查询可选能力，providerId 与 modelId 必须同时提供；不修改提示词、不启动生成",
   parameters: z.strictObject({
     providerId: z.string().min(1).optional(),
     modelId: z.string().min(1).optional(),
     size: z.string().min(1).optional(),
     ratio: z.string().min(1).optional(),
+    count: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   }).refine((args) => (args.providerId === undefined) === (args.modelId === undefined), "providerId 与 modelId 必须同时提供"),
   async execute(args, { signal }) {
     signal?.throwIfAborted();
@@ -453,6 +496,7 @@ nodeTools.register({
     data.value.model = JSON.stringify([choice.providerId, choice.modelId]);
     if (args.size !== undefined) data.value.size = args.size;
     if (args.ratio !== undefined) data.value.ratio = args.ratio;
+    if (args.count !== undefined) data.value.count = args.count;
     return getConfig();
   },
 });
@@ -471,7 +515,7 @@ nodeTools.register({
 
 nodeTools.register({
   name: "generateImage",
-  description: "启动此节点的后台普通图片生成，使用普通生成提示词、模型、分辨率、比例和参考图片；局部重绘模式下须先退出；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止生成",
+  description: "按配置张数逐张生成，批量结果分别保留在画布；使用普通生成提示词、模型、分辨率、比例和参考图片；局部重绘模式下须先退出；立即返回已开始，用 getGenerationStatus 查询完成结果，cancelGeneration 停止剩余生成并保留已有结果",
   parameters: z.strictObject({}),
   execute(_args, { signal }) {
     signal?.throwIfAborted();
