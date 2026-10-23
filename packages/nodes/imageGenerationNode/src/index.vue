@@ -1,14 +1,16 @@
 <template>
   <nodeSkeleton
+    class="candidateNode"
+    :class="{ candidateStack: !data.candidatesExpanded && data.candidates.length > 1 }"
     v-bind="nodeProps"
     v-model:bottomVisible="node.selected"
     :topVisible="node.selected"
     topWidth="max-content"
     :downloadUrl="previewUrl"
     :downloadName="outputFile?.url.split(/[\\/]/).at(-1)"
-    @fullscreen="previewVisible = true"
+    @fullscreen="openFullscreen"
     :bottomWidth="660"
-    :style="{ width: data.candidatesExpanded && data.candidates.length ? '760px' : (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
+    :style="{ width: data.candidatesExpanded && data.candidates.length ? `${Math.max(1, visibleCandidates.length) * ((imageWidth || 426) + 16) + 2}px` : (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
     <template v-if="editor?.mode" #top><div ref="paintToolbar" /></template>
     <template #topActions>
       <el-button class="panoramaButton" :icon="IconPanoramaHorizontal" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting || panorama?.busy || !previewUrl" text title="全景图" aria-label="全景图" @click.stop="panorama?.open($event)">全景图<icon-chevron-down class="menuChevron" :size="14" /></el-button>
@@ -24,34 +26,41 @@
       <el-button :icon="IconPencil" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="标记" aria-label="标记" @click.stop="startEditor('mark')" />
     </template>
     <div v-if="data.candidatesExpanded && data.candidates.length" class="candidateGroup nodrag nopan nowheel" @pointerdown.stop @dblclick.stop>
-      <div class="candidateHeading"><span>候选图片 · {{ data.candidates.length }} 张</span><span>{{ generating ? `已完成 ${batchCompleted}/${batchTotal}，逐张生成中` : '点击图片选择，下游使用选中图' }}</span></div>
-      <div class="candidateGrid">
-        <candidateCard v-for="(item, index) in data.candidates" :key="item.url" :item="item" :index="index" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" @select="selectCandidate(item)" @preview="openCandidatePreview(index)" />
+      <div class="railControls">
+        <button type="button" :aria-pressed="starredOnly" @click="starredOnly = !starredOnly">{{ starredOnly ? '★ 仅看星标' : '☆ 星标筛选' }}</button>
+        <button type="button" aria-label="收起候选" @click="data.candidatesExpanded = false">{{ data.candidates.length }} <icon-chevron-down :size="15" class="expandedChevron" /></button>
+        <button type="button" aria-label="全屏查看候选" @click="openFullscreen">全屏查看</button>
+      </div>
+      <div class="candidateRail">
+        <candidateCard v-for="item in visibleCandidates" :key="item.url" :style="{ width: `${imageWidth || 426}px`, height: '240px' }" :item="item" :index="data.candidates.indexOf(item)" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" @select="selectCandidate(item)" @star="toggleStar(item)" @copy="copyCandidate(item).catch(error => showNodeError(error, '复制图片失败'))" @preview="openCandidatePreview(data.candidates.indexOf(item))" />
+        <div v-if="!visibleCandidates.length" class="noCandidates">还没有星标图片</div>
       </div>
     </div>
-    <div v-else v-loading="generating || uploading" class="imageContent nopan" :aria-busy="generating || uploading">
-      <imageEditor
-        v-if="previewUrl"
-        ref="editor"
-        :src="previewUrl"
-        :toolbarTarget="paintToolbar"
-        :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy"
-        alt="生成图片"
-        @load="resizeImage"
-        @error="showNodeError('无法预览该图片', '图片预览失败')" />
-      <div v-else-if="inpaintGuideUrl" class="inpaintGuide">
-        <img :src="inpaintGuideUrl" alt="局部重绘标注图" draggable="false" @load="resizeImage" @error="showNodeError('无法读取重绘标注图', '重绘标注读取失败')" />
-        <span>红色标注为重绘区域</span>
+    <div v-else class="candidateStage">
+      <div v-loading="generating || uploading" class="imageContent nopan" :aria-busy="generating || uploading">
+        <imageEditor
+          v-if="previewUrl"
+          ref="editor"
+          :src="previewUrl"
+          :toolbarTarget="paintToolbar"
+          :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy"
+          alt="生成图片"
+          @load="resizeImage"
+          @error="showNodeError('无法预览该图片', '图片预览失败')" />
+        <div v-else-if="inpaintGuideUrl" class="inpaintGuide">
+          <img :src="inpaintGuideUrl" alt="局部重绘标注图" draggable="false" @load="resizeImage" @error="showNodeError('无法读取重绘标注图', '重绘标注读取失败')" />
+          <span>红色标注为重绘区域</span>
+        </div>
+        <div v-else class="imageEmpty" role="img" aria-label="暂无生成图片">
+          <icon-photo-ai :size="48" stroke="1.25" aria-hidden="true" />
+        </div>
       </div>
-      <div v-else class="imageEmpty" role="img" aria-label="暂无生成图片">
-        <icon-photo-ai :size="48" stroke="1.25" aria-hidden="true" />
-      </div>
+      <template v-if="data.candidates.length && !editor?.mode">
+        <button type="button" class="stackStar nodrag nopan" :aria-label="mainCandidate?.starred ? '取消主图星标' : '星标主图'" :aria-pressed="!!mainCandidate?.starred" @pointerdown.stop @click.stop="mainCandidate && toggleStar(mainCandidate)"><icon-star :size="21" :fill="mainCandidate?.starred ? 'currentColor' : 'none'" /></button>
+        <button type="button" class="stackCount nodrag nopan" aria-label="展开候选" :aria-expanded="false" @pointerdown.stop @click.stop="data.candidatesExpanded = true">{{ data.candidates.length }} <icon-chevron-down :size="18" /></button>
+      </template>
     </div>
-    <div v-if="data.candidates.length" class="candidateBar nodrag nopan" @pointerdown.stop @dblclick.stop>
-      <span>{{ data.candidates.length }} 张候选</span>
-      <el-button text :disabled="!!editor?.mode" :aria-expanded="data.candidatesExpanded" @click.stop="data.candidatesExpanded = !data.candidatesExpanded">{{ data.candidatesExpanded ? '收起候选' : '展开候选' }}</el-button>
-      <el-button v-if="data.candidates.length > 1" text @click.stop="compareVisible = true">大图比较</el-button>
-    </div>
+    <div v-if="generating && batchTotal > 1" class="batchProgress" role="status">已完成 {{ batchCompleted }}/{{ batchTotal }}</div>
     <template v-if="editor?.mode !== 'mark'" #bottom>
       <div v-if="lightingVisible" ref="lightingTarget" />
       <div v-else-if="multiAngleVisible" ref="multiAngleTarget" />
@@ -110,31 +119,19 @@
       </el-card>
     </template>
   </nodeSkeleton>
-  <el-dialog v-model="compareVisible" title="候选图片比较" width="min(1400px, calc(100vw - 32px))" appendToBody destroyOnClose>
-    <div class="compareGallery nodrag nopan nowheel" @pointerdown.stop @mousedown.stop @dblclick.stop @keydown.stop>
-      <p>点击满意的图片设为节点输出；其他候选会继续保留。点击“放大”查看原图。</p>
-      <div class="candidateGrid">
-        <candidateCard v-for="(item, index) in data.candidates" :key="item.url" :item="item" :index="index" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" @select="selectCandidate(item)" @preview="openCandidatePreview(index)" />
-      </div>
-    </div>
-  </el-dialog>
-  <el-image-viewer v-if="candidatePreviewVisible && candidatePreviewUrl" :urlList="[candidatePreviewUrl]" teleported @close="candidatePreviewVisible = false" />
+  <candidateViewer v-if="candidatePreviewVisible" :items="viewerCandidates" :initialIndex="candidatePreviewIndex" :mainUrl="outputFile?.url" :disabled="candidateSelectionDisabled" @close="candidatePreviewVisible = false" @select="selectCandidate" @star="toggleStar" />
   <imageLighting v-if="lightingVisible" ref="lighting" :src="previewUrl" :source="outputFile" :target="lightingTarget" :disabled="generating || deleting || uploading || gridSplit?.splitting" @close="lightingVisible = false" />
   <imageMultiAngle v-if="multiAngleVisible" ref="multiAngle" :src="previewUrl" :source="outputFile" :target="multiAngleTarget" :disabled="generating || deleting || uploading || gridSplit?.splitting" @close="multiAngleVisible = false" />
   <imagePanorama ref="panorama" :src="previewUrl" :source="outputFile" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting" @open="openPanorama" />
   <imageGridSplit ref="gridSplit" :src="previewUrl" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy" :active="node.selected" />
   <el-image-viewer v-if="inpaintPreviewVisible && inpaintGuideUrl" :urlList="[inpaintGuideUrl]" teleported @close="inpaintPreviewVisible = false" />
-  <el-image-viewer
-    v-if="previewVisible && previewUrl"
-    :urlList="[previewUrl]"
-    teleported
-    @close="previewVisible = false" />
 </template>
 
 <script setup lang="ts">
+import { useVueFlow } from "@vue-flow/core";
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
-import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer, ElDialog } from "element-plus";
-import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown } from "@tabler/icons-vue";
+import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer } from "element-plus";
+import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown, IconStar } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeImageRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
 import { showNodeError } from "@toonflow/node-shared/showNodeError";
@@ -151,6 +148,7 @@ import imageLighting from "@toonflow/node-image/imageLighting";
 import imagePanorama from "@toonflow/node-image/imagePanorama";
 import imageMultiAngle from "@toonflow/node-image/imageMultiAngle";
 import type { NodeMediaValue } from "@toonflow/nodes-scaffold/values";
+import candidateViewer from "./components/candidateViewer.vue";
 import candidateCard from "./components/candidateCard.vue";
 import generationSettings from "./components/generationSettings.vue";
 
@@ -163,11 +161,12 @@ defineOptions({
   ] satisfies NodeHandle[],
 });
 const vLoading = ElLoading.directive;
+const { addNodes, nodeTypes } = useVueFlow();
 const { id, node, nodeProps, nodeEvent, outputs, files, ai, updateNodeInternals } = useNode({
   label: "图片生成",
 });
 type PromptModel = NonNullable<InstanceType<typeof promptInput>["$props"]["modelValue"]>;
-const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; candidates: NodeMediaValue[]; candidatesExpanded: boolean; inpaint?: ImageInpaint });
+const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; candidates: (NodeMediaValue & { starred?: boolean })[]; candidatesExpanded: boolean; inpaint?: ImageInpaint });
 data.value.prompt ??= "";
 data.value.promptModel ??= [];
 data.value.inpaintPrompt ??= "";
@@ -178,7 +177,8 @@ data.value.ratio ??= "16:9";
 data.value.count ??= 1;
 data.value.candidates ??= [];
 data.value.candidatesExpanded ??= false;
-const compareVisible = ref(false);
+const starredOnly = ref(false);
+const visibleCandidates = computed(() => data.value.candidates.filter(item => !starredOnly.value || item.starred));
 const candidatePreviewVisible = ref(false);
 const candidatePreviewIndex = ref(0);
 const batchCompleted = ref(0);
@@ -201,7 +201,6 @@ const multiAngleVisible = ref(false);
 const panorama = ref<InstanceType<typeof imagePanorama>>();
 let disposed = false;
 const deleting = ref(false);
-const previewVisible = ref(false);
 const inpaintPreviewVisible = ref(false);
 const imageWidth = ref(0);
 let generationController: AbortController | undefined;
@@ -263,19 +262,40 @@ const priceInput = computed(() => {
 });
 const outputFile = computed(() => outputs.value.image?.dataType === "IMAGE" ? outputs.value.image.value : undefined);
 const candidateSelectionDisabled = computed(() => deleting.value || uploading.value || !!editor.value?.mode || !!lighting.value?.generating || !!multiAngle.value?.generating || !!panorama.value?.busy || !!gridSplit.value?.splitting);
-const candidatePreviewUrl = files.useFileUrl(
-  () => candidatePreviewVisible.value ? data.value.candidates[candidatePreviewIndex.value] : undefined,
-  error => showNodeError(error, "候选图片读取失败")
-);
+watch(outputFile, item => {
+  if (item && !data.value.candidates.some(candidate => candidate.url === item.url)) data.value.candidates.push({ ...item });
+}, { immediate: true });
+const mainCandidate = computed(() => data.value.candidates.find(item => item.url === outputFile.value?.url));
+const viewerCandidates = computed(() => data.value.candidates.length ? data.value.candidates : outputFile.value ? [outputFile.value] : []);
 function openCandidatePreview(index: number) {
   candidatePreviewIndex.value = index;
   candidatePreviewVisible.value = true;
 }
+function openFullscreen() {
+  if (!viewerCandidates.value.length) return;
+  openCandidatePreview(Math.max(0, viewerCandidates.value.findIndex(item => item.url === outputFile.value?.url)));
+}
+function toggleStar(item: NodeMediaValue) {
+  const candidate = data.value.candidates.find(candidate => candidate.url === item.url);
+  if (candidate) candidate.starred = !candidate.starred;
+}
+async function copyCandidate(item: NodeMediaValue) {
+  if (candidateSelectionDisabled.value) return;
+  if (!nodeTypes.value?.["remote-imageNode"]) throw new Error("请先启用图片节点插件");
+  const imageId = crypto.randomUUID();
+  const workspace = files.getWorkspaceFiles();
+  const content = await workspace.read(item.url);
+  await workspace.mkdir(`assets/${imageId}`);
+  const path = `assets/${imageId}/${item.url.split("/").at(-1)}`;
+  await workspace.write(path, content, true);
+  if (disposed) return;
+  addNodes({ id: imageId, type: "remote-imageNode", position: { x: node.computedPosition.x, y: node.computedPosition.y + (node.dimensions.height || 280) + 100 }, data: { label: "候选图片副本", outputs: { image: { dataType: "IMAGE", value: { url: path, mimeType: item.mimeType } } } } });
+}
 function selectCandidate(item: NodeMediaValue) {
   if (candidateSelectionDisabled.value) return;
-  outputs.value.image = { dataType: "IMAGE", value: { ...item } };
+  outputs.value.image = { dataType: "IMAGE", value: { url: item.url, mimeType: item.mimeType } };
 }
-watch(() => [data.value.candidatesExpanded, data.value.candidates.length], async () => {
+watch(() => [data.value.candidatesExpanded, visibleCandidates.value.length], async () => {
   await nextTick();
   updateNodeInternals();
 });
@@ -388,7 +408,6 @@ async function startGeneration() {
   batchCompleted.value = 0;
   batchTotal.value = count;
   // 保留当前输出及历次候选，后续生成不覆盖用户的选择。
-  if (outputFile.value && !data.value.candidates.some(item => item.url === outputFile.value!.url)) data.value.candidates.push({ ...outputFile.value });
   if (count > 1) data.value.candidatesExpanded = true;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace.list()
@@ -405,7 +424,7 @@ async function startGeneration() {
           const item = { url: result.path, mimeType: result.mimeType };
           data.value.candidates.push(item);
           // 首张自动成为输出；已有选择在批量追加时保持不变。
-          if (!outputFile.value || count === 1) outputs.value.image = { dataType: "IMAGE", value: { ...item } };
+          if (!outputFile.value || count === 1) outputs.value.image = { dataType: "IMAGE", value: { url: item.url, mimeType: item.mimeType } };
         }
         batchCompleted.value = index + 1;
       }
@@ -549,18 +568,29 @@ nodeTools.register({
 </script>
 
 <style scoped lang="scss">
-.candidateBar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 0; font-size: 12px; color: var(--el-text-color-secondary); span { margin-right: auto; } }
+.candidateNode :deep(.contentCard) { overflow: visible; background: transparent; border-color: transparent; }
+.candidateStack :deep(.cardContainer) {
+  &::before, &::after { content: ""; position: absolute; inset: 14px 8px 2px; border: 1px solid #ffffff30; border-radius: 18px; background: #242424; pointer-events: none; }
+  &::before { transform: rotate(3deg) translate(8px, 5px); }
+  &::after { transform: rotate(-2deg) translate(-4px, 6px); }
+  .contentCard { position: relative; z-index: 1; }
+}
+.candidateStage {
+  position: relative;
+  .stackStar, .stackCount { position: absolute; top: 12px; z-index: 2; display: flex; align-items: center; gap: 12px; border: 0; border-radius: 10px; padding: 9px 12px; background: #25252599; backdrop-filter: blur(8px); color: white; cursor: pointer; font-size: 15px; }
+  .stackStar { left: 12px; padding: 9px; &[aria-pressed="true"] { color: #ffda78; } }
+  .stackCount { right: 12px; }
+}
 .candidateGroup {
-  padding: 8px;
-  .candidateHeading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
-  .candidateGrid { max-height: 620px; overflow: auto; }
+  position: relative;
+  .railControls { position: absolute; bottom: calc(100% + 8px); right: 0; display: flex; gap: 8px;
+    button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; background: #252525; color: #eee; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+    .expandedChevron { transform: rotate(180deg); }
+  }
+  .candidateRail { display: flex; gap: 16px; align-items: stretch; .candidateCard { flex-shrink: 0; } }
+  .noCandidates { display: grid; place-items: center; width: 426px; height: 240px; color: var(--el-text-color-secondary); }
 }
-.candidateGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.compareGallery {
-  p { margin: 0 0 16px; color: var(--el-text-color-secondary); }
-  .candidateGrid { max-height: 72vh; overflow: auto; padding: 4px; }
-  @media (max-width: 700px) { .candidateGrid { grid-template-columns: minmax(0, 1fr); } }
-}
+.batchProgress { margin-top: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
 .panoramaButton {
   &[aria-expanded="true"] .menuChevron { transform: rotate(180deg); }
 }
@@ -571,7 +601,7 @@ nodeTools.register({
   place-items: center;
   min-height: 144px;
   overflow: hidden;
-  border-radius: var(--el-border-radius-base);
+  border-radius: 16px;
 
   .inpaintGuide {
     position: relative;
