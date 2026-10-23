@@ -11,8 +11,6 @@
     :style="{ width: data.candidatesExpanded && data.candidates.length ? '760px' : (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
     <template v-if="editor?.mode" #top><div ref="paintToolbar" /></template>
     <template #topActions>
-      <el-button v-if="data.candidates.length" text :disabled="!!editor?.mode" :aria-expanded="data.candidatesExpanded" @click.stop="data.candidatesExpanded = !data.candidatesExpanded">{{ data.candidatesExpanded ? '收起候选' : '展开候选' }}（{{ data.candidates.length }}）</el-button>
-      <el-button v-if="data.candidates.length > 1" text @click.stop="compareVisible = true">大图比较</el-button>
       <el-button class="panoramaButton" :icon="IconPanoramaHorizontal" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting || panorama?.busy || !previewUrl" text title="全景图" aria-label="全景图" @click.stop="panorama?.open($event)">全景图<icon-chevron-down class="menuChevron" :size="14" /></el-button>
       <el-button :icon="IconBrush" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="局部重绘" aria-label="局部重绘" @click.stop="startEditor('inpaint')">局部重绘</el-button>
       <el-button :icon="IconSun" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="打光" aria-label="打光" @click.stop="openLighting">打光</el-button>
@@ -48,6 +46,11 @@
       <div v-else class="imageEmpty" role="img" aria-label="暂无生成图片">
         <icon-photo-ai :size="48" stroke="1.25" aria-hidden="true" />
       </div>
+    </div>
+    <div v-if="data.candidates.length" class="candidateBar nodrag nopan" @pointerdown.stop @dblclick.stop>
+      <span>{{ data.candidates.length }} 张候选</span>
+      <el-button text :disabled="!!editor?.mode" :aria-expanded="data.candidatesExpanded" @click.stop="data.candidatesExpanded = !data.candidatesExpanded">{{ data.candidatesExpanded ? '收起候选' : '展开候选' }}</el-button>
+      <el-button v-if="data.candidates.length > 1" text @click.stop="compareVisible = true">大图比较</el-button>
     </div>
     <template v-if="editor?.mode !== 'mark'" #bottom>
       <div v-if="lightingVisible" ref="lightingTarget" />
@@ -546,6 +549,7 @@ nodeTools.register({
 </script>
 
 <style scoped lang="scss">
+.candidateBar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 0; font-size: 12px; color: var(--el-text-color-secondary); span { margin-right: auto; } }
 .candidateGroup {
   padding: 8px;
   .candidateHeading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
