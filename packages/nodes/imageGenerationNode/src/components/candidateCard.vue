@@ -8,6 +8,7 @@
       <div class="imageActions">
         <button type="button" :class="{ starred: item.starred }" :aria-label="`${item.starred ? '取消星标' : '星标'}候选 ${index + 1}`" :aria-pressed="!!item.starred" @click="emit('star')"><icon-star :size="19" :fill="item.starred ? 'currentColor' : 'none'" /></button>
         <button type="button" :disabled="disabled || !url || failed" :aria-label="`复制候选 ${index + 1} 到画布`" title="复制到画布" @click="emit('copy')"><icon-copy :size="18" /></button>
+        <button type="button" class="deleteAction" :disabled="!canRemove" :aria-label="`删除候选 ${index + 1}`" title="删除候选（可撤销）" @click="emit('remove')"><icon-trash :size="18" /></button>
         <a :href="url || undefined" :download="item.url.split('/').at(-1)" :aria-label="`下载候选 ${index + 1}`" title="下载"><icon-download :size="19" /></a>
       </div>
       <button class="mainAction" :class="{ current: selected }" type="button" :disabled="disabled || selected || !url || failed" :aria-label="`${selected ? '当前主图' : '设为主图'}：候选 ${index + 1}`" @click="emit('select')">{{ selected ? '✓ 主图' : '设为主图' }}</button>
@@ -17,12 +18,12 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { IconStar, IconCopy, IconDownload } from "@tabler/icons-vue";
+import { IconStar, IconCopy, IconDownload, IconTrash } from "@tabler/icons-vue";
 import { useNodeFiles } from "@toonflow/nodes-scaffold/workspaceFiles";
 import type { NodeMediaValue } from "@toonflow/nodes-scaffold/values";
 
-const props = defineProps<{ item: NodeMediaValue & { starred?: boolean }; index: number; selected: boolean; disabled?: boolean; thumbnail?: boolean }>();
-const emit = defineEmits<{ select: []; preview: []; star: []; copy: [] }>();
+const props = defineProps<{ item: NodeMediaValue & { starred?: boolean }; index: number; selected: boolean; disabled?: boolean; thumbnail?: boolean; canRemove?: boolean }>();
+const emit = defineEmits<{ select: []; preview: []; star: []; copy: []; remove: [] }>();
 const files = useNodeFiles();
 const failed = ref(false);
 watch(() => props.item.url, () => { failed.value = false; });
@@ -48,6 +49,8 @@ const url = files.useFileUrl(() => props.item, () => { failed.value = true; });
   .imageActions {
     left: 12px; display: flex; align-items: center; padding: 3px; border-radius: 10px; background: #252525a8; backdrop-filter: blur(8px);
     button, a { display: grid; place-items: center; width: 30px; height: 30px; border: 0; color: white; background: transparent; cursor: pointer; }
+    .deleteAction:hover { color: #ff8585; }
+    button:disabled { opacity: .4; cursor: default; }
     .starred { color: #ffda78; }
   }
   .mainAction {

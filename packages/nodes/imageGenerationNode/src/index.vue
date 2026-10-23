@@ -32,7 +32,7 @@
         <button type="button" aria-label="全屏查看候选" @click="openFullscreen">全屏查看</button>
       </div>
       <div class="candidateRail">
-        <candidateCard v-for="item in visibleCandidates" :key="item.url" :style="{ width: `${imageWidth || 426}px`, height: '240px' }" :item="item" :index="data.candidates.indexOf(item)" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" @select="selectCandidate(item)" @star="toggleStar(item)" @copy="copyCandidate(item).catch(error => showNodeError(error, '复制图片失败'))" @preview="openCandidatePreview(data.candidates.indexOf(item))" />
+        <candidateCard v-for="item in visibleCandidates" :key="item.url" :style="{ width: `${imageWidth || 426}px`, height: '240px' }" :item="item" :index="data.candidates.indexOf(item)" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" :canRemove="!generating && !candidateSelectionDisabled" @remove="removeCandidate(item)" @select="selectCandidate(item)" @star="toggleStar(item)" @copy="copyCandidate(item).catch(error => showNodeError(error, '复制图片失败'))" @preview="openCandidatePreview(data.candidates.indexOf(item))" />
         <div v-if="!visibleCandidates.length" class="noCandidates">还没有星标图片</div>
       </div>
     </div>
@@ -59,6 +59,10 @@
         <button type="button" class="stackStar nodrag nopan" :aria-label="mainCandidate?.starred ? '取消主图星标' : '星标主图'" :aria-pressed="!!mainCandidate?.starred" @pointerdown.stop @click.stop="mainCandidate && toggleStar(mainCandidate)"><icon-star :size="21" :fill="mainCandidate?.starred ? 'currentColor' : 'none'" /></button>
         <button type="button" class="stackCount nodrag nopan" aria-label="展开候选" :aria-expanded="false" @pointerdown.stop @click.stop="data.candidatesExpanded = true">{{ data.candidates.length }} <icon-chevron-down :size="18" /></button>
       </template>
+    </div>
+    <div v-if="removedCandidates.length" class="candidateUndo nodrag nopan" @pointerdown.stop>
+      <span>已删除 {{ removedCandidates.length }} 张候选</span>
+      <el-button text :disabled="generating || candidateSelectionDisabled" @click.stop="restoreCandidate">撤销删除</el-button>
     </div>
     <div v-if="generating && batchTotal > 1" class="batchProgress" role="status">已完成 {{ batchCompleted }}/{{ batchTotal }}</div>
     <template v-if="editor?.mode !== 'mark'" #bottom>
@@ -119,7 +123,7 @@
       </el-card>
     </template>
   </nodeSkeleton>
-  <candidateViewer v-if="candidatePreviewVisible" :items="viewerCandidates" :initialIndex="candidatePreviewIndex" :mainUrl="outputFile?.url" :disabled="candidateSelectionDisabled" @close="candidatePreviewVisible = false" @select="selectCandidate" @star="toggleStar" />
+  <candidateViewer v-if="candidatePreviewVisible" :items="viewerCandidates" :initialIndex="candidatePreviewIndex" :mainUrl="outputFile?.url" :disabled="candidateSelectionDisabled" :canRemove="!generating && !candidateSelectionDisabled" :canRestore="!!removedCandidates.length && !generating && !candidateSelectionDisabled" @restore="restoreCandidate" @remove="removeCandidate" @close="candidatePreviewVisible = false" @select="selectCandidate" @star="toggleStar" />
   <imageLighting v-if="lightingVisible" ref="lighting" :src="previewUrl" :source="outputFile" :target="lightingTarget" :disabled="generating || deleting || uploading || gridSplit?.splitting" @close="lightingVisible = false" />
   <imageMultiAngle v-if="multiAngleVisible" ref="multiAngle" :src="previewUrl" :source="outputFile" :target="multiAngleTarget" :disabled="generating || deleting || uploading || gridSplit?.splitting" @close="multiAngleVisible = false" />
   <imagePanorama ref="panorama" :src="previewUrl" :source="outputFile" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting" @open="openPanorama" />
@@ -177,6 +181,7 @@ data.value.ratio ??= "16:9";
 data.value.count ??= 1;
 data.value.candidates ??= [];
 data.value.candidatesExpanded ??= false;
+const removedCandidates = ref<{ item: NodeMediaValue & { starred?: boolean }; index: number; wasMain: boolean }[]>([]);
 const starredOnly = ref(false);
 const visibleCandidates = computed(() => data.value.candidates.filter(item => !starredOnly.value || item.starred));
 const candidatePreviewVisible = ref(false);
@@ -290,6 +295,32 @@ async function copyCandidate(item: NodeMediaValue) {
   await workspace.write(path, content, true);
   if (disposed) return;
   addNodes({ id: imageId, type: "remote-imageNode", position: { x: node.computedPosition.x, y: node.computedPosition.y + (node.dimensions.height || 280) + 100 }, data: { label: "候选图片副本", outputs: { image: { dataType: "IMAGE", value: { url: path, mimeType: item.mimeType } } } } });
+}
+function removeCandidate(item: NodeMediaValue) {
+  if (generating.value || candidateSelectionDisabled.value) return;
+  const index = data.value.candidates.findIndex(candidate => candidate.url === item.url);
+  if (index < 0) return;
+  removedCandidates.value.push({ item: { ...data.value.candidates[index]! }, index, wasMain: outputFile.value?.url === item.url });
+  const remaining = data.value.candidates.filter(candidate => candidate.url !== item.url);
+  if (outputFile.value?.url === item.url) {
+    const next = remaining[Math.min(index, remaining.length - 1)];
+    if (next) outputs.value.image = { dataType: "IMAGE", value: { url: next.url, mimeType: next.mimeType } };
+    else delete outputs.value.image;
+  }
+  // 保留素材文件用于候选撤销，并保留其他节点对同一文件的引用。
+  data.value.candidates = remaining;
+  if (!remaining.length) {
+    candidatePreviewVisible.value = false;
+    data.value.candidatesExpanded = false;
+  }
+}
+function restoreCandidate() {
+  if (generating.value || candidateSelectionDisabled.value) return;
+  const removed = removedCandidates.value.pop();
+  if (!removed) return;
+  if (!data.value.candidates.some(item => item.url === removed.item.url)) data.value.candidates.splice(Math.min(removed.index, data.value.candidates.length), 0, removed.item);
+  if (removed.wasMain || !outputFile.value) selectCandidate(removed.item);
+  data.value.candidatesExpanded = true;
 }
 function selectCandidate(item: NodeMediaValue) {
   if (candidateSelectionDisabled.value) return;
@@ -596,6 +627,7 @@ nodeTools.register({
   .candidateRail { display: flex; gap: 16px; align-items: stretch; .candidateCard { flex-shrink: 0; } }
   .noCandidates { display: grid; place-items: center; width: 426px; height: 240px; color: var(--el-text-color-secondary); }
 }
+.candidateUndo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .batchProgress { margin-top: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
 .panoramaButton {
   &[aria-expanded="true"] .menuChevron { transform: rotate(180deg); }
