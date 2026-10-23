@@ -567,14 +567,20 @@ nodeTools.register({
 });
 </script>
 
-<style scoped lang="scss">
-.candidateNode :deep(.contentCard) { overflow: visible; background: transparent; border-color: transparent; }
-.candidateStack :deep(.cardContainer) {
-  &::before, &::after { content: ""; position: absolute; inset: 14px 8px 2px; border: 1px solid #ffffff30; border-radius: 18px; background: #242424; pointer-events: none; }
-  &::before { transform: rotate(3deg) translate(8px, 5px); }
-  &::after { transform: rotate(-2deg) translate(-4px, 6px); }
-  .contentCard { position: relative; z-index: 1; }
+<style lang="scss">
+.candidateNode {
+  .cardContainer .contentCard, .cardContainer .contentCard.selected { overflow: visible; background: transparent; border-color: transparent; }
+  .contentCard > .el-card__body { overflow: visible; }
+  &.candidateStack .cardContainer {
+    &::before, &::after { content: ""; position: absolute; inset: 14px 8px 2px; border: 1px solid #ffffff30; border-radius: 18px; background: #242424; pointer-events: none; }
+    &::before { transform: rotate(3deg) translate(8px, 5px); }
+    &::after { transform: rotate(-2deg) translate(-4px, 6px); }
+    .contentCard { position: relative; z-index: 1; }
+  }
 }
+</style>
+
+<style scoped lang="scss">
 .candidateStage {
   position: relative;
   .stackStar, .stackCount { position: absolute; top: 12px; z-index: 2; display: flex; align-items: center; gap: 12px; border: 0; border-radius: 10px; padding: 9px 12px; background: #25252599; backdrop-filter: blur(8px); color: white; cursor: pointer; font-size: 15px; }
