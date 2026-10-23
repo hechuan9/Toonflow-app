@@ -128,8 +128,10 @@ onBeforeUnmount(() => {
     position: absolute;
     bottom: 100%;
     width: 100%;
-    max-height: min(440px, 65dvh);
-    overflow: auto;
+    height: min(440px, 65dvh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     background: var(--el-bg-color-overlay);
     border-top: 1px solid var(--el-border-color);
     box-shadow: 0 -6px 20px #00000012;
@@ -139,11 +141,14 @@ onBeforeUnmount(() => {
     .ttlHint { color: var(--el-text-color-secondary); }
     .detailColumns {
       display: grid;
+      flex: 1;
+      min-height: 0;
       grid-template-columns: 1fr 1fr;
+      grid-template-rows: minmax(0, 1fr);
       gap: 24px;
-      > section { min-width: 0; }
+      > section { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
       h2 { font-size: 13px; margin: 0 0 10px; small { font-weight: normal; color: var(--el-text-color-secondary); } }
-      ul { list-style: none; padding: 0; margin: 0; }
+      ul { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; list-style: none; padding: 0; margin: 0; }
       .taskList .taskRow {
         padding: 9px 0;
         border-bottom: 1px solid var(--el-border-color-lighter);
@@ -158,7 +163,7 @@ onBeforeUnmount(() => {
   }
   @media (max-width: 640px) {
     .statusToggle { gap: 7px; padding: 0 8px; .modelName { display: none; } .expandLabel { font-size: 11px; } }
-    .statusDetails .detailColumns { grid-template-columns: 1fr; gap: 18px; }
+    .statusDetails .detailColumns { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 18px; }
   }
 }
 </style>
