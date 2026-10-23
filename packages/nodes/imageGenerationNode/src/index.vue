@@ -439,7 +439,7 @@ async function startGeneration() {
   batchCompleted.value = 0;
   batchTotal.value = count;
   // 保留当前输出及历次候选，后续生成不覆盖用户的选择。
-  if (count > 1) data.value.candidatesExpanded = true;
+  data.value.candidatesExpanded = false;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace.list()
     .then(async ({ directory }) => {
