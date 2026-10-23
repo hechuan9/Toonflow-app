@@ -1,3 +1,4 @@
+import * as modelQueue from "@/utils/modelQueue";
 import * as assets from "@/utils/assets";
 import * as browser from "@/utils/browser";
 import * as singleAgent from "@/utils/singleAgent";
@@ -33,6 +34,7 @@ import * as personalization from "@/utils/personalization";
 import * as mentionFiles from "@/agent/mentionFiles";
 
 export default {
+  modelQueue,
   assets,
   browser,
   singleAgent,

@@ -7,6 +7,7 @@ import type { AgentImageReference } from "@/agent/runtime/imageAttachments";
 import { getRequestFiles, type RequestFile } from "@/utils/ai/requestFiles";
 import { createFileTransport, FileRequestLimitError } from "@/utils/ai/files";
 import conf from "@/utils/conf";
+import { queueTextFetch } from "@/utils/modelQueue";
 
 function contentHash(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -177,7 +178,7 @@ export function configureAgentRequests(session: AgentSession, limits?: { maxRequ
             recordOffload(ids);
             return true;
           }
-          const request = files.fetch;
+          const request = queueTextFetch(auth?.auth.baseUrl ?? model.baseUrl, model.id, model.name, files.fetch);
           const stream = await streamFunction(model, requestContext, {
             ...options,
             apiKey,

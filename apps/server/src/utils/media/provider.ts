@@ -1,5 +1,6 @@
 import { t, translateMessage, validationOptions } from "@/lib/i18n";
 
+import { runMedia } from "@/utils/modelQueue";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, unlink } from "@toonflow/file";
 import { dirname, join } from "node:path";
@@ -435,7 +436,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
     ["generateAudio", definition.generateAudio],
   ] as const) {
     if (!generate) continue;
-    Object.assign(provider, { [name]: async (request: ImageRequest | VideoRequest | AudioRequest) => {
+    Object.assign(provider, { [name]: async (request: ImageRequest | VideoRequest | AudioRequest) => runMedia(definition.id, request.model, definition.models.find(model => model.id === request.model)?.label ?? definition.label, signal, provider.tool.fetch, async scheduledFetch => {
       let failure: { status?: number; message: string } | undefined;
       let pendingRequests = 0;
       let overlappingRequests = false;
@@ -445,7 +446,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
         const requestId = ++requestCount;
         failure = undefined;
         try {
-          const response = await provider.tool.fetch(input, init);
+          const response = await scheduledFetch(input, init);
           if (!response.ok) failure = { status: response.status, message: await responseErrorMessage(response, provider.config) };
           else {
             const readJson = response.json;
@@ -490,7 +491,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
         if (message === (typeof error === "string" ? error : info?.message)) throw error;
         throw Object.assign(new Error(message), typeof error === "object" ? error : undefined, { message, cause: error });
       }
-    } });
+    }) });
   }
   return provider;
 }

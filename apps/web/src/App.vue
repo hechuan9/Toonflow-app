@@ -1,11 +1,14 @@
 <template>
   <el-config-provider :locale="elementLocale">
     <config-provider :globalConfig="tdesignLocale">
+      <div class="appViewport" :class="{ withModelStatus: modelStatusVisible }">
       <router-view v-slot="{ Component: currentComponent }">
         <transition name="el-fade-in" mode="out-in">
           <component :is="currentComponent" />
         </transition>
       </router-view>
+      </div>
+      <modelStatus @visible="modelStatusVisible = $event" />
       <loadingPage v-model:visible="workspaceStore.projectLoadingVisible" v-model:drawn="workspaceStore.projectLoadingDrawn" :active="workspaceStore.projectLoading" />
       <ffmpegRequired />
       <updateBox
@@ -58,6 +61,7 @@ import { isMobile, isDesktop } from "@/lib/platform";
 import { saveSettings, settings, uiSettings } from "@/stores/settings";
 import { desktopUpdateSnapshot, stopDesktopUpdateObservation } from "@/stores/desktopUpdate";
 import { useWorkspaceStore } from "@/stores/workspace";
+import modelStatus from "@/components/modelStatus.vue";
 import loadingPage from "@/components/loadingPage.vue";
 import { useMcpControl } from "@/lib/mcpControl";
 import ffmpegRequired from "@/components/settings/ffmpegRequired.vue";
@@ -66,6 +70,7 @@ import "element-plus/theme-chalk/dark/css-vars.css";
 
 useMcpControl();
 const workspaceStore = useWorkspaceStore();
+const modelStatusVisible = ref(false);
 
 // ACT: TDesign 缺少的语言使用英语基底，聊天控件由应用字典补齐。
 const tdesignLocales = {
@@ -178,6 +183,14 @@ watchEffect(() => {
 </script>
 
 <style lang="scss">
+#app .appViewport {
+  height: 100dvh;
+  &.withModelStatus {
+    height: calc(100dvh - 39px);
+    > * { height: 100%; min-height: 0; }
+  }
+}
+
 html {
   background-color: var(--el-bg-color);
   color: var(--el-text-color-primary);

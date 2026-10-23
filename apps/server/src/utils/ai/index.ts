@@ -6,6 +6,7 @@ import { getSupportedThinkingLevels, type Context, type KnownApi, type Model, ty
 import { defaultThinkingLevels, thinkingLevels, type ThinkingLevel } from "@/lib/modelReasoning";
 import { z } from "zod";
 import conf from "@/utils/conf";
+import { queueTextFetch } from "@/utils/modelQueue";
 import { readReference } from "@/utils/media/generation";
 import modelContextLimits from "@/utils/ai/modelContextLimits";
 import { createFileTransport, getUnsupportedFileText, type FileProvider } from "@/utils/ai/files";
@@ -204,7 +205,7 @@ export function streamAi(
   return aiApis[provider.protocol].streamSimple(model, context, {
     apiKey: provider.apiKey,
     signal,
-    fetch: files.fetch,
+    fetch: queueTextFetch(baseUrl, configuredModel.id, configuredModel.label, files.fetch),
     onPayload: async (payload) => {
       let body = payload as Record<string, unknown>;
       if (references.length) {
