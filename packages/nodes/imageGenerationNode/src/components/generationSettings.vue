@@ -29,7 +29,7 @@
         </el-button>
       </div>
       <div class="sectionLabel">张数</div>
-      <el-input-number v-model="count" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :step="1" :disabled="disabled" controlsPosition="right" aria-label="生成张数" />
+      <input v-model.number="count" class="countInput" type="number" min="1" :max="Number.MAX_SAFE_INTEGER" step="1" :disabled="disabled" aria-label="生成张数" />
       <p>逐张排队生成，停止后保留已完成的图片。</p>
     </div>
   </el-popover>
@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { ElButton, ElPopover, ElRadioGroup, ElRadioButton, ElInputNumber } from "element-plus";
+import { ElButton, ElPopover, ElRadioGroup, ElRadioButton } from "element-plus";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-vue";
 
 defineProps<{ sizes: string[]; ratios: string[]; disabled?: boolean }>();
@@ -68,6 +68,16 @@ function ratioStyle(value: string) {
 
 .generationSettings {
   text-align: left;
+  .countInput {
+    box-sizing: border-box;
+    width: 150px;
+    padding: 8px 12px;
+    color: var(--el-text-color-primary);
+    background: var(--el-fill-color-blank);
+    border: 1px solid var(--el-border-color);
+    border-radius: var(--el-border-radius-base);
+    font: inherit;
+  }
   .sectionLabel {
     margin-top: 12px;
     margin-bottom: 8px;
