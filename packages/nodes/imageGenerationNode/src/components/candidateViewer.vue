@@ -6,6 +6,7 @@
         <button :aria-pressed="starredOnly" @click="starredOnly = !starredOnly">{{ starredOnly ? '★ 仅看星标' : '☆ 星标筛选' }}</button>
         <button v-if="current" :aria-pressed="!!current.starred" @click="emit('star', current)">{{ current.starred ? '★ 已星标' : '☆ 星标' }}</button>
         <button v-if="current" :disabled="disabled || current.url === mainUrl" @click="emit('select', current)">{{ current.url === mainUrl ? '✓ 主图' : '设为主图' }}</button>
+        <a v-if="current && url && !failed" :href="url" :download="current.url.split('/').at(-1)" aria-label="下载当前候选">下载</a>
         <button v-if="current" :disabled="!canRemove" aria-label="删除当前候选" title="删除候选（可撤销）" @click="emit('remove', current)">删除</button>
         <button v-if="canRestore" @click="emit('restore')">撤销删除</button>
         <button class="closeViewer" aria-label="关闭全屏查看" @click="emit('close')">×</button>
@@ -19,7 +20,7 @@
         <button class="next" aria-label="下一张候选" :disabled="visibleItems.length < 2" @click="move(1)">›</button>
       </div>
       <div class="thumbnailStrip" aria-label="候选缩略图">
-        <candidateCard v-for="item in visibleItems" :key="item.url" :item="item" :index="items.indexOf(item)" :selected="current?.url === item.url" thumbnail @preview="previewIndex = items.indexOf(item)" />
+        <candidateCard v-for="item in visibleItems" :key="item.url" :item="item" :index="items.indexOf(item)" :selected="current?.url === item.url" @preview="previewIndex = items.indexOf(item)" />
       </div>
     </div>
   </el-dialog>
@@ -61,8 +62,8 @@ function move(direction: number) {
   .el-dialog__header { padding: 0 0 12px; }
   .el-dialog__body { flex: 1; min-height: 0; padding: 0; }
   .viewerHeader {
-    display: flex; align-items: center; gap: 12px; color: #aaa;
-    button { border: 0; border-radius: 8px; padding: 9px 12px; color: #eee; background: #252525; cursor: pointer; }
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: #aaa;
+    button, a { text-decoration: none; font: inherit; font-size: 13px; border: 0; border-radius: 8px; padding: 9px 12px; color: #eee; background: #252525; cursor: pointer; }
     button:disabled { opacity: .5; cursor: default; }
     .closeViewer { margin-left: auto; font-size: 24px; line-height: 20px; }
   }

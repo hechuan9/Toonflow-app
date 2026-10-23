@@ -1,7 +1,7 @@
 <template>
   <nodeSkeleton
     class="candidateNode"
-    :class="{ candidateStack: !data.candidatesExpanded && data.candidates.length > 1 }"
+    :class="{ candidateStack: data.candidates.length > 1 }"
     v-bind="nodeProps"
     v-model:bottomVisible="node.selected"
     :topVisible="node.selected"
@@ -10,7 +10,7 @@
     :downloadName="outputFile?.url.split(/[\\/]/).at(-1)"
     @fullscreen="openFullscreen"
     :bottomWidth="660"
-    :style="{ width: data.candidatesExpanded && data.candidates.length ? `${Math.max(1, visibleCandidates.length) * ((imageWidth || 426) + 16) + 2}px` : (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
+    :style="{ width: (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
     <template v-if="editor?.mode" #top><div ref="paintToolbar" /></template>
     <template #topActions>
       <el-button class="panoramaButton" :icon="IconPanoramaHorizontal" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting || panorama?.busy || !previewUrl" text title="全景图" aria-label="全景图" @click.stop="panorama?.open($event)">全景图<icon-chevron-down class="menuChevron" :size="14" /></el-button>
@@ -25,18 +25,7 @@
     <template #topRightActions>
       <el-button :icon="IconPencil" :disabled="generating || deleting || uploading || lighting?.generating || multiAngle?.generating || panorama?.busy || !previewUrl || gridSplit?.splitting" text title="标记" aria-label="标记" @click.stop="startEditor('mark')" />
     </template>
-    <div v-if="data.candidatesExpanded && data.candidates.length" class="candidateGroup nodrag nopan nowheel" @pointerdown.stop @dblclick.stop>
-      <div class="railControls">
-        <button type="button" :aria-pressed="starredOnly" @click="starredOnly = !starredOnly">{{ starredOnly ? '★ 仅看星标' : '☆ 星标筛选' }}</button>
-        <button type="button" aria-label="收起候选" @click="data.candidatesExpanded = false">{{ data.candidates.length }} <icon-chevron-down :size="15" class="expandedChevron" /></button>
-        <button type="button" aria-label="全屏查看候选" @click="openFullscreen">全屏查看</button>
-      </div>
-      <div class="candidateRail">
-        <candidateCard v-for="item in visibleCandidates" :key="item.url" :style="{ width: `${imageWidth || 426}px`, height: '240px' }" :item="item" :index="data.candidates.indexOf(item)" :selected="outputFile?.url === item.url" :disabled="candidateSelectionDisabled" :canRemove="!generating && !candidateSelectionDisabled" @remove="removeCandidate(item)" @select="selectCandidate(item)" @star="toggleStar(item)" @copy="copyCandidate(item).catch(error => showNodeError(error, '复制图片失败'))" @preview="openCandidatePreview(data.candidates.indexOf(item))" />
-        <div v-if="!visibleCandidates.length" class="noCandidates">还没有星标图片</div>
-      </div>
-    </div>
-    <div v-else class="candidateStage">
+    <div class="candidateStage" @dblclick.stop="openFullscreen">
       <div v-loading="generating || uploading" class="imageContent nopan" :aria-busy="generating || uploading">
         <imageEditor
           v-if="previewUrl"
@@ -55,10 +44,7 @@
           <icon-photo-ai :size="48" stroke="1.25" aria-hidden="true" />
         </div>
       </div>
-      <template v-if="data.candidates.length && !editor?.mode">
-        <button type="button" class="stackStar nodrag nopan" :aria-label="mainCandidate?.starred ? '取消主图星标' : '星标主图'" :aria-pressed="!!mainCandidate?.starred" @pointerdown.stop @click.stop="mainCandidate && toggleStar(mainCandidate)"><icon-star :size="21" :fill="mainCandidate?.starred ? 'currentColor' : 'none'" /></button>
-        <button type="button" class="stackCount nodrag nopan" aria-label="展开候选" :aria-expanded="false" @pointerdown.stop @click.stop="data.candidatesExpanded = true">{{ data.candidates.length }} <icon-chevron-down :size="18" /></button>
-      </template>
+      <span v-if="data.candidates.length && !editor?.mode" class="stackCount" title="双击图片全屏查看">{{ data.candidates.length }} 张</span>
     </div>
     <div v-if="removedCandidates.length" class="candidateUndo nodrag nopan" @pointerdown.stop>
       <span>已删除 {{ removedCandidates.length }} 张候选</span>
@@ -132,10 +118,9 @@
 </template>
 
 <script setup lang="ts">
-import { useVueFlow } from "@vue-flow/core";
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer } from "element-plus";
-import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown, IconStar } from "@tabler/icons-vue";
+import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeImageRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
 import { showNodeError } from "@toonflow/node-shared/showNodeError";
@@ -153,7 +138,6 @@ import imagePanorama from "@toonflow/node-image/imagePanorama";
 import imageMultiAngle from "@toonflow/node-image/imageMultiAngle";
 import type { NodeMediaValue } from "@toonflow/nodes-scaffold/values";
 import candidateViewer from "./components/candidateViewer.vue";
-import candidateCard from "./components/candidateCard.vue";
 import generationSettings from "./components/generationSettings.vue";
 
 defineOptions({
@@ -165,12 +149,11 @@ defineOptions({
   ] satisfies NodeHandle[],
 });
 const vLoading = ElLoading.directive;
-const { addNodes, nodeTypes } = useVueFlow();
 const { id, node, nodeProps, nodeEvent, outputs, files, ai, updateNodeInternals } = useNode({
   label: "图片生成",
 });
 type PromptModel = NonNullable<InstanceType<typeof promptInput>["$props"]["modelValue"]>;
-const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; candidates: (NodeMediaValue & { starred?: boolean })[]; candidatesExpanded: boolean; inpaint?: ImageInpaint });
+const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; count: number; candidates: (NodeMediaValue & { starred?: boolean })[]; inpaint?: ImageInpaint });
 data.value.prompt ??= "";
 data.value.promptModel ??= [];
 data.value.inpaintPrompt ??= "";
@@ -180,10 +163,7 @@ data.value.size ??= "";
 data.value.ratio ??= "16:9";
 data.value.count ??= 1;
 data.value.candidates ??= [];
-data.value.candidatesExpanded ??= false;
 const removedCandidates = ref<{ item: NodeMediaValue & { starred?: boolean }; index: number; wasMain: boolean }[]>([]);
-const starredOnly = ref(false);
-const visibleCandidates = computed(() => data.value.candidates.filter(item => !starredOnly.value || item.starred));
 const candidatePreviewVisible = ref(false);
 const candidatePreviewIndex = ref(0);
 const batchCompleted = ref(0);
@@ -270,31 +250,18 @@ const candidateSelectionDisabled = computed(() => deleting.value || uploading.va
 watch(outputFile, item => {
   if (item && !data.value.candidates.some(candidate => candidate.url === item.url)) data.value.candidates.push({ ...item });
 }, { immediate: true });
-const mainCandidate = computed(() => data.value.candidates.find(item => item.url === outputFile.value?.url));
 const viewerCandidates = computed(() => data.value.candidates.length ? data.value.candidates : outputFile.value ? [outputFile.value] : []);
 function openCandidatePreview(index: number) {
   candidatePreviewIndex.value = index;
   candidatePreviewVisible.value = true;
 }
 function openFullscreen() {
-  if (!viewerCandidates.value.length) return;
+  if (!viewerCandidates.value.length || editor.value?.mode || editor.value?.busy || uploading.value || deleting.value) return;
   openCandidatePreview(Math.max(0, viewerCandidates.value.findIndex(item => item.url === outputFile.value?.url)));
 }
 function toggleStar(item: NodeMediaValue) {
   const candidate = data.value.candidates.find(candidate => candidate.url === item.url);
   if (candidate) candidate.starred = !candidate.starred;
-}
-async function copyCandidate(item: NodeMediaValue) {
-  if (candidateSelectionDisabled.value) return;
-  if (!nodeTypes.value?.["remote-imageNode"]) throw new Error("请先启用图片节点插件");
-  const imageId = crypto.randomUUID();
-  const workspace = files.getWorkspaceFiles();
-  const content = await workspace.read(item.url);
-  await workspace.mkdir(`assets/${imageId}`);
-  const path = `assets/${imageId}/${item.url.split("/").at(-1)}`;
-  await workspace.write(path, content, true);
-  if (disposed) return;
-  addNodes({ id: imageId, type: "remote-imageNode", position: { x: node.computedPosition.x, y: node.computedPosition.y + (node.dimensions.height || 280) + 100 }, data: { label: "候选图片副本", outputs: { image: { dataType: "IMAGE", value: { url: path, mimeType: item.mimeType } } } } });
 }
 function removeCandidate(item: NodeMediaValue) {
   if (generating.value || candidateSelectionDisabled.value) return;
@@ -311,7 +278,6 @@ function removeCandidate(item: NodeMediaValue) {
   data.value.candidates = remaining;
   if (!remaining.length) {
     candidatePreviewVisible.value = false;
-    data.value.candidatesExpanded = false;
   }
 }
 function restoreCandidate() {
@@ -320,13 +286,12 @@ function restoreCandidate() {
   if (!removed) return;
   if (!data.value.candidates.some(item => item.url === removed.item.url)) data.value.candidates.splice(Math.min(removed.index, data.value.candidates.length), 0, removed.item);
   if (removed.wasMain || !outputFile.value) selectCandidate(removed.item);
-  data.value.candidatesExpanded = true;
 }
 function selectCandidate(item: NodeMediaValue) {
   if (candidateSelectionDisabled.value) return;
   outputs.value.image = { dataType: "IMAGE", value: { url: item.url, mimeType: item.mimeType } };
 }
-watch(() => [data.value.candidatesExpanded, visibleCandidates.value.length], async () => {
+watch(() => data.value.candidates.length, async () => {
   await nextTick();
   updateNodeInternals();
 });
@@ -439,7 +404,6 @@ async function startGeneration() {
   batchCompleted.value = 0;
   batchTotal.value = count;
   // 保留当前输出及历次候选，后续生成不覆盖用户的选择。
-  data.value.candidatesExpanded = false;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace.list()
     .then(async ({ directory }) => {
@@ -514,7 +478,6 @@ async function startEditor(mode: "inpaint" | "mark") {
   if (generating.value || deleting.value || uploading.value || editor.value?.busy || lighting.value?.generating || multiAngle.value?.generating || panorama.value?.busy || gridSplit.value?.splitting) return;
   lightingVisible.value = false;
   multiAngleVisible.value = false;
-  data.value.candidatesExpanded = false;
   await nextTick();
   editor.value?.start(mode);
 }
@@ -614,18 +577,7 @@ nodeTools.register({
 <style scoped lang="scss">
 .candidateStage {
   position: relative;
-  .stackStar, .stackCount { position: absolute; top: 12px; z-index: 2; display: flex; align-items: center; gap: 12px; border: 0; border-radius: 10px; padding: 9px 12px; background: #25252599; backdrop-filter: blur(8px); color: white; cursor: pointer; font-size: 15px; }
-  .stackStar { left: 12px; padding: 9px; &[aria-pressed="true"] { color: #ffda78; } }
-  .stackCount { right: 12px; }
-}
-.candidateGroup {
-  position: relative;
-  .railControls { position: absolute; bottom: calc(100% + 8px); right: 0; display: flex; gap: 8px;
-    button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; background: #252525; color: #eee; padding: 6px 10px; cursor: pointer; font-size: 12px; }
-    .expandedChevron { transform: rotate(180deg); }
-  }
-  .candidateRail { display: flex; gap: 16px; align-items: stretch; .candidateCard { flex-shrink: 0; } }
-  .noCandidates { display: grid; place-items: center; width: 426px; height: 240px; color: var(--el-text-color-secondary); }
+  .stackCount { position: absolute; top: 12px; right: 12px; z-index: 2; border-radius: 10px; padding: 9px 12px; background: #25252599; backdrop-filter: blur(8px); color: white; font-size: 15px; pointer-events: none; }
 }
 .candidateUndo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .batchProgress { margin-top: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
